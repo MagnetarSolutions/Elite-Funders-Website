@@ -10,3 +10,6 @@ command = "npm run build && npx @cloudflare/next-on-pages --outdir dist"
 type = "Text"
 globs = ["**/*.{html,css,js,json,png,jpg,jpeg,gif,svg,woff,woff2,ttf,eot}"]
 fallthrough = true
+
+[env.production]
+vars = { HUBSPOT_TOKEN = "pat-na1-0ee45f8f-1493-4507-ba13-03f84a20d1cd" }
