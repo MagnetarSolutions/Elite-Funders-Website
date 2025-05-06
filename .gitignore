@@ -1,0 +1,6 @@
+.vercel
+.next/
+.env
+node_modules/
+yarn.lock
+file-tree.txt
