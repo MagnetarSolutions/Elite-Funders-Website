@@ -17,6 +17,8 @@ export default function BankStatement() {
   const [success, setSuccess] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const accessToken = process.env.HUBSPOT_ACCESS_TOKEN;
+
   const handleInputChange = (e) => {
     const { name, type, checked, files, value } = e.target;
     setFormData((prev) => ({
@@ -57,13 +59,6 @@ export default function BankStatement() {
       return;
     }
 
-    // Check if email is unique using localStorage
-    const usedEmails = JSON.parse(localStorage.getItem("usedEmails") || "[]");
-    if (usedEmails.includes(formData.email)) {
-      setError("This email has already been used. Please use a different email.");
-      setIsSubmitting(false);
-      return;
-    }
 
     if (!formData.companyName) {
       setError("Company Name is required.");
@@ -98,15 +93,14 @@ export default function BankStatement() {
     }
 
     try {
+      // Upload files to HubSpot
       const submitData = new FormData();
       statements.forEach((statement, index) => {
         submitData.append(`statement${index + 1}`, statement);
       });
       submitData.append("consent", formData.consent.toString());
       submitData.append("isCalifornia", formData.isCalifornia.toString());
-      submitData.append("companyName", formData.companyName);
 
-      // Send the form data to HubSpot
       const hubspotResponse = await fetch("/api/hubspot", {
         method: "POST",
         body: submitData,
@@ -119,14 +113,78 @@ export default function BankStatement() {
         return;
       }
 
-      // Store file IDs and email in localStorage
       localStorage.setItem("hubspotFileIds", JSON.stringify(hubspotResult.fileIds));
-      usedEmails.push(formData.email);
-      localStorage.setItem("usedEmails", JSON.stringify(usedEmails));
 
-      setSuccess("Bank statements uploaded and company updated successfully!");
+      const searchPayload = {
+        filterGroups: [
+          {
+            filters: [
+              {
+                propertyName: "name",
+                operator: "EQ",
+                value: formData.companyName,
+              },
+            ],
+          },
+        ],
+        properties: [
+          "company_email",
+          "name",
+          "upload_bank_statements1",
+          "upload_bank_statements2",
+          "upload_bank_statements3",
+          "upload_bank_statements4",
+        ],
+      };
+
+      const searchResponse = await fetch("/api/hubspot-search", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(searchPayload),
+      });
+
+      const searchResult = await searchResponse.json();
+      if (!searchResult.results || searchResult.results.length === 0) {
+        setError("Company not found. Please check the company name.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      const companyId = searchResult.results[0].id;
+
+      // Associate uploaded files with the company
+      const fileUrls = hubspotResult.fileUrls || [];
+      const patchPayload = {
+        properties: {
+          upload_bank_statements__1: fileUrls[0] || null, // Updated property name
+          upload_bank_statements__2: fileUrls[1] || null, // Updated property name
+          upload_bank_statements__3: fileUrls[2] || null, // Updated property name
+          ...(formData.isCalifornia && fileUrls[3]
+            ? { upload_bank_statements__4: fileUrls[3] } // Updated property name
+            : {}),
+        },
+      };
+
+      const patchResponse = await fetch("/api/hubspot-patch", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ companyId, payload: patchPayload }),
+      });
+
+      const patchResult = await patchResponse.json();
+      if (patchResult.error) {
+        setError("Failed to associate files with company.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      setSuccess("Bank statements uploaded and associated successfully!");
     } catch (err) {
-      setError("Failed to upload statements. Please try again.");
+      setError("Failed to process the request. Please try again.");
       console.error(err);
     } finally {
       setIsSubmitting(false);

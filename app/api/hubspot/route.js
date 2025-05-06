@@ -2,14 +2,12 @@ import { NextResponse } from "next/server";
 import axios from "axios";
 
 export async function POST(request) {
-  const accessToken = "pat-na1-0ee45f8f-1493-4507-ba13-03f84a20d1cd";
-  const folderId = "189156370602";
+  const accessToken = process.env.HUBSPOT_ACCESS_TOKEN;
   const formData = await request.formData();
   const statement1 = formData.get("statement1");
   const statement2 = formData.get("statement2");
   const statement3 = formData.get("statement3");
   const statement4 = formData.get("statement4");
-  const companyName = formData.get("companyName");
   const consent = formData.get("consent") === "true";
   const isCalifornia = formData.get("isCalifornia") === "true";
 
@@ -18,48 +16,6 @@ export async function POST(request) {
   }
 
   try {
-    // STEP 1: Search company (only if companyName is provided and not "pleasetest")
-    let companyId;
-    if (companyName && companyName !== "pleasetest") {
-      console.log(`Searching for company with name: ${companyName}`);
-      const searchResponse = await axios.post(
-        "https://api.hubapi.com/crm/v3/objects/companies/search",
-        {
-          filterGroups: [
-            {
-              filters: [
-                {
-                  propertyName: "name",
-                  operator: "EQ",
-                  value: companyName
-                }
-              ]
-            }
-          ],
-          properties: ["name"]
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json"
-          }
-        }
-      );
-
-      console.log("Company search response:", searchResponse.data);
-
-      if (searchResponse.data.total === 0) {
-        console.log(`No company found for name: ${companyName}`);
-        return NextResponse.json({ error: "Company not found." }, { status: 404 });
-      }
-
-      companyId = searchResponse.data.results[0].id;
-      console.log(`Company found with ID: ${companyId}`);
-    } else {
-      console.log(`Skipping company search for companyName: ${companyName || "undefined"}`);
-    }
-
-    // STEP 2: Upload files (same as working code, no email or companyName)
     const uploadFile = async (file, fileName) => {
       const fileFormData = new FormData();
       fileFormData.append("file", file, fileName);
@@ -69,7 +25,7 @@ export async function POST(request) {
         duplicateValidationStrategy: "NONE",
         duplicateValidationScope: "EXACT_FOLDER"
       }));
-      fileFormData.append("folderId", folderId);
+      fileFormData.append("folderId", "189156370602");
 
       const response = await axios.post(
         "https://api.hubapi.com/filemanager/api/v3/files/upload",
@@ -81,7 +37,11 @@ export async function POST(request) {
           },
         }
       );
-      return response.data;
+      // Extract file ID and URL from response.data.objects[0]
+      return {
+        id: response.data.objects[0].id,
+        url: response.data.objects[0].url // Correctly access the URL
+      };
     };
 
     const uploads = [
@@ -98,27 +58,12 @@ export async function POST(request) {
       acc[`statement${index + 1}`] = file.id;
       return acc;
     }, {});
-    const urls = files.map(file => file.url).join("\n");
+    const fileUrls = files.map((file) => file.url); // Map to the extracted URLs
 
-    // STEP 3: Update company with file URLs (only if companyId exists)
-    if (companyId) {
-      await axios.patch(
-        `https://api.hubapi.com/crm/v3/objects/companies/${companyId}`,
-        {
-          properties: {
-            bank_statement_urls: urls
-          }
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json"
-          }
-        }
-      );
-    }
+    // Log fileUrls to verify they are correct
+    console.log("Uploaded File URLs:", fileUrls);
 
-    return NextResponse.json({ fileIds, message: companyId ? "Files uploaded and company updated." : "Files uploaded successfully." });
+    return NextResponse.json({ fileIds, fileUrls });
   } catch (error) {
     console.error("HubSpot API Error:", {
       message: error.message,
